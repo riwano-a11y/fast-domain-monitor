@@ -16,6 +16,7 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 6
+
     steps:
       - name: Download files
         uses: actions/checkout@v4
@@ -26,14 +27,49 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Restore CT position
+        uses: actions/cache@v4
+        with:
+          path: certstream-data
+          key: certstream-state-${{ github.run_id }}
+          restore-keys: |
+            certstream-state-
+
       - name: Install packages
         run: pip install -r requirements.txt
+
+      - name: Start private CT stream
+        run: |
+          mkdir -p certstream-data
+          docker run --detach \
+            --name certstream \
+            --publish 8080:8080 \
+            --volume "$PWD/certstream-data:/data" \
+            --env CERTSTREAM_CT_LOG_STATE_FILE=/data/state.json \
+            --env CERTSTREAM_LOG_LEVEL=warn \
+            ghcr.io/reloading01/certstream-server-rust:latest
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          docker logs certstream
+          exit 1
 
       - name: Monitor live CT logs
         env:
           TARGET_IPS: ${{ secrets.TARGET_IPS }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          CERTSTREAM_URL: ${{ secrets.CERTSTREAM_URL }}
+          CERTSTREAM_URL: ws://127.0.0.1:8080/domains-only
           SEND_TEST_MESSAGE: ${{ github.event_name == 'workflow_dispatch' }}
-          RUN_SECONDS: "260"
+          RUN_SECONDS: "220"
         run: python monitor.py
+
+      - name: Show CT server status
+        if: always()
+        run: |
+          docker logs --tail 50 certstream || true
+          test -s certstream-data/state.json
