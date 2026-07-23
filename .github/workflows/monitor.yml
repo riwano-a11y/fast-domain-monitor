@@ -1,0 +1,39 @@
+name: Fast Domain Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "2-57/5 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fast-domain-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Download files
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install packages
+        run: pip install -r requirements.txt
+
+      - name: Monitor live CT logs
+        env:
+          TARGET_IPS: ${{ secrets.TARGET_IPS }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          CERTSTREAM_URL: ${{ secrets.CERTSTREAM_URL }}
+          SEND_TEST_MESSAGE: ${{ github.event_name == 'workflow_dispatch' }}
+          RUN_SECONDS: "260"
+        run: python monitor.py
